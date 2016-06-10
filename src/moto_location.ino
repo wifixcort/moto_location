@@ -35,7 +35,9 @@
 
 /*
 Conecctions
-  SAMD21     FONA
+  SAMD21 |
+ Pinout  |  FONA
+------------------
   0          TX
   1          RX
   2          Rst
@@ -44,6 +46,10 @@ Conecctions
   5          Vio
   Gnd        Gnd
   RAW        VBat
+------------------
+         | ADXL335
+  6          x
+  
 */
 
 #include <Adafruit_SleepyDog.h>
@@ -212,9 +218,9 @@ void loop(){
 
   if(fona_gps_location()){
     log_location(latitude, longitude, altitude, location_feed);
-    log_fix(1, status_feed);
+    //log_fix(1, status_feed);
     if (distance > maxDistance) { // Set alarm on?
-      log_alert(1, alerts_feed);
+  //log_alert(1, alerts_feed);
     }//end if
   }//end if
   /*else if(fona_gsm_location()){
@@ -535,7 +541,7 @@ void halt(const __FlashStringHelper *error) {
   serial.println(error);
   delay(1000);
   Watchdog.enable(1000);
-   Watchdog.reset();
+  Watchdog.reset();
   while (1) {}
 }//end halt
 
