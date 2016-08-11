@@ -48,7 +48,9 @@ Conecctions
   RAW        VBat
 ------------------
          | ADXL335
-  6          x
+  A3          x
+  Vcc         +
+  GND         G
   
 */
 
@@ -71,6 +73,11 @@ Conecctions
 #define FONA_KEY 3
 #define FONA_PS 4
 #define FONA_VIO 5
+//-----------------------------------
+
+//-------Motion detection------------
+#define ADXL_Y A2
+#define ADXL_X A3
 //-----------------------------------
 
 #define SERIAL_BAUD   115200
@@ -97,18 +104,21 @@ uint16_t last_fona_battery_state;
 float initialLatitude, initialLongitude, latitude, longitude, speed_kph, heading, altitude, distance;
 float gsm_latitude, gsm_longitude;
 
+//float motion_alerts;
+//char *motion_activation = "ON";
+
 //boolean lock_initial_gps = false;
 //uint8_t gps_fix_failures = 0;
 
 // FONA GPRS configuration
-#define FONA_APN             ""  // APN used by cell data service (leave blank if unused)
-#define FONA_USERNAME        ""  // Username used by cell data service (leave blank if unused).
-#define FONA_PASSWORD        ""  // Password used by cell data service (leave blank if unused).
+//#define FONA_APN             ""  // APN used by cell data service (leave blank if unused)
+//#define FONA_USERNAME        ""  // Username used by cell data service (leave blank if unused).
+//#define FONA_PASSWORD        ""  // Password used by cell data service (leave blank if unused).
 
 // Adafruit IO configuration
 #define AIO_SERVER           "io.adafruit.com"  // Adafruit IO server name.
 #define AIO_SERVERPORT       1883  // Adafruit IO port.
-#define AIO_USERNAME         "username"  // Adafruit IO username (see http://accounts.adafruit.com/).
+#define AIO_USERNAME         "USERNAME"  // Adafruit IO username (see http://accounts.adafruit.com/).
 #define AIO_KEY              "AIO_KEY"  // Adafruit IO key (see settings page at: https://io.adafruit.com/settings).
 
 // Feeds
@@ -134,15 +144,86 @@ Adafruit_MQTT_Publish battery_feed = Adafruit_MQTT_Publish(&mqtt, BATTERY_FEED);
 const char ALERTS_FEED[] PROGMEM = AIO_USERNAME "/feeds/alerts";
 Adafruit_MQTT_Publish alerts_feed = Adafruit_MQTT_Publish(&mqtt, ALERTS_FEED);
 
-const char STATUS_FEED[] PROGMEM = AIO_USERNAME "/feeds/status";
-Adafruit_MQTT_Publish status_feed = Adafruit_MQTT_Publish(&mqtt, STATUS_FEED);
+const char ADXL_FEED[] PROGMEM = AIO_USERNAME "/feeds/adxl";
+Adafruit_MQTT_Publish adxl_feed = Adafruit_MQTT_Publish(&mqtt, ADXL_FEED);
+
+//const char MOTION_FEED[] PROGMEM = AIO_USERNAME "/feeds/motion";
+//Adafruit_MQTT_Subscribe motion_active = Adafruit_MQTT_Subscribe(&mqtt, MOTION_FEED);
+
 
 //------------------------------------------------
 
-#if defined(TEST)
-  long interval = 1000;
-  unsigned long start =0;
-#endif
+float deviation = 0;
+
+uint32_t previousMillis_1 = 0;//Update connection time
+uint32_t previousMillis_2 = 0;//Update adafruit feeds time
+
+//======================Default Functions=============================
+
+void setup() {
+  pinMode(FONA_KEY, OUTPUT);
+  pinMode(FONA_PS, INPUT);
+  pinMode(FONA_VIO, OUTPUT);
+  digitalWrite(FONA_VIO, HIGH);
+  #if defined(DEBUG)
+    serial.begin(SERIAL_BAUD);
+  #endif
+  delay(5000);
+  
+  init_fona();
+  print_IMEI(); 
+  
+  log_alert(0, alerts_feed);
+}//end setup
+
+void loop(){
+  float temp_deviant = standard_deviation();
+
+  if(temp_deviant > deviation){//update deviation
+    deviation = temp_deviant;
+  }//end if
+  
+  temporizer_1(millis(), 3000);//Check connections
+
+  temporizer_2(millis(), 15000);//Update Adafruit feeds
+  
+//TODO 
+/*
+ * Mantener corriendo la verificación de vibración, si ocurre una vibración
+ * alta, guardar ese dato 10s después revisar si ocurrió una vibración y reportarla
+ * de otra forma no reportar nada.
+*/
+  
+/*
+  Adafruit_MQTT_Subscribe *subscription;
+  while ((subscription = mqtt.readSubscription(5000))) {
+    if (subscription == &motion_active) {
+      
+      motion_activation = (char *)motion_active.lastread;
+    }//end if
+  }//end while
+*/
+  /*else if(fona_gsm_location()){
+      log_location(gsm_latitude, gsm_longitude, 0, location_feed);
+      log_fix(0, status_feed);
+  }*/
+/*
+  float devians = standard_deviation();//13ms for every 30 samples
+  if((devians > 2)&&(motion_activation == "ON")){
+    log_motion_detection(devians, adxl_feed);
+    serial.print("DEVIAN = ");
+    serial.println(devians);
+  }//end if
+  //log_fix(gp_fix, status_feed);
+  */
+  #if defined(DEBUG)
+  serial.flush();
+  #endif
+}//end loop
+
+//====================================================================
+
+//=======================Fona Related Functions=======================
 
 void init_fona(){
   fona_off();
@@ -151,11 +232,14 @@ void init_fona(){
   delay(2000);
   fonaSerial.begin(4800);
   if(!check_fona()){// See if the FONA is responding
+    serial.println("FONA PROBLEMS");
     halt(F("Couldn't find FONA"));
-  }//end if
+  }else{
+    serial.println(F("FONA is ok"));
+  }
   
   //APN configuration
-  //fona.setGPRSNetworkSettings(F(FONA_APN), F(FONA_USERNAME), F(FONA_PASSWORD));
+  //fona.setGPRSNetworkSettings(F("internet.movistar.cr"), F("movistarcr"), F("movistarcr"));
   #if defined(DEBUG)
   serial.println(F("Waiting 20s.."));
   #endif
@@ -180,89 +264,42 @@ void init_fona(){
     serial.println(F("MQTT Connected!"));
     #endif
   }//end if
-  
+  //mqtt.subscribe(&motion_active);
 }//end init_fona
 
-void setup() {
-  pinMode(FONA_KEY, OUTPUT);
-  pinMode(FONA_PS, INPUT);
-  pinMode(FONA_VIO, OUTPUT);
-  digitalWrite(FONA_VIO, HIGH);
+uint8_t check_fona(){
+  // See if the FONA is responding
+  if (!fona.begin(fonaSerial)) {
+    return 0;
+  }//end if
+  return 1;
+}//end check_fona
+
+void fona_on(){
   #if defined(DEBUG)
-    serial.begin(SERIAL_BAUD);
+    serial.println("Turning on Fona: ");
   #endif
-  delay(5000);
-  
-  init_fona();
-  print_IMEI(); 
-  
-  log_alert(0, alerts_feed);
-}//end setup
+  while(digitalRead(FONA_PS)==LOW){
+    digitalWrite(FONA_KEY, LOW);
+    delay(3000);
+    break;    
+  }//end while
+  digitalWrite(FONA_KEY, HIGH);
+  //delay(2000); 
+}//end fona_on
 
-void loop(){
-/*  if(!lock_initial_gps){
-    gpFIX();
-    gps_ready(stat, status_feed);
-  }*/
-  #if defined(FREERAM)
-    serial.print("Free 2 = ");
-    serial.println(freeRam());
-  #endif
-  if((!fona.GPRSstate())||(fona.getNetworkStatus() != 1)){
-    //halt(F("Network connection problems, resetting..."));
-    init_fona();
-  }else if (!fona.TCPconnected() || (txFailures >= MAX_TX_FAILURES)) {
-    //halt(F("MQTT connection failed, resetting..."));
-    init_fona();
-  }//end if
-
-  if(fona_gps_location()){
-    log_location(latitude, longitude, altitude, location_feed);
-    //log_fix(1, status_feed);
-    if (distance > maxDistance) { // Set alarm on?
-  //log_alert(1, alerts_feed);
-    }//end if
-  }//end if
-  /*else if(fona_gsm_location()){
-      log_location(gsm_latitude, gsm_longitude, 0, location_feed);
-      log_fix(0, status_feed);
-  }*/
-  uint16_t fona_battery = fona_get_battery();
-  if(fona_battery != last_fona_battery_state){// 
-    last_fona_battery_state = fona_battery;
-    log_battery_percent(fona_battery, battery_feed);
-  }//end if
-  
-  //log_fix(gp_fix, status_feed);
-  
-  delay(15000);
+void fona_off(){
   #if defined(DEBUG)
-  serial.flush();
+    serial.println("Turning off Fona: ");
   #endif
-}//end loop
-
-void gpFIX(){
-  // Initial GPS read
-  bool gpsFix = false;
-  if(fona.GPSstatus() >= 2){//}
-  //do{
-  //while(!gpsFix){
-    //gpsFix = fona.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude);
-    gpsFix = fona_gps_location();
-    initialLatitude = latitude;
-    initialLongitude = longitude;
-    delay(100);
-    if(txFailures > 200){
-      halt(F("GPS not fix"));
-    }//end if
-    txFailures++;
-    delay(10);
-//    return gpsFix;
-  //}while(!gpsFix);
-  }//end if
-  txFailures = 0; 
-//  return 0; 
-}//end gpFIX
+  while(digitalRead(FONA_PS)==HIGH){
+    digitalWrite(FONA_KEY, LOW);
+    delay(3000);
+    break;
+  }//end while
+  digitalWrite(FONA_KEY, HIGH);
+  //delay(4000);
+}//end fona_off
 
 int gprs_enable(int maxtry){
   // turn GPRS on
@@ -298,53 +335,6 @@ int gprs_disable(){
   }//end if
 }//end gprs_disable
 
-void flushSerial() {
-  #if defined(DEBUG)
-  while (serial.available()) 
-    serial.read();
-  #endif
-}//end flushSerial
-
-uint8_t check_fona(){
-  // See if the FONA is responding
-  if (!fona.begin(fonaSerial)) {
-    #if defined(DEBUG)
-      serial.println(F("Couldn't find FONA"));
-    #endif
-    return 0;
-  }//end if
-  #if defined(DEBUG)
-    serial.println(F("FONA is OK"));
-  #endif
-  return 1;
-}//end check_fona
-
-void fona_on(){
-  #if defined(DEBUG)
-    serial.println("Turning on Fona: ");
-  #endif
-  while(digitalRead(FONA_PS)==LOW){
-    digitalWrite(FONA_KEY, LOW);
-    delay(3000);
-    break;    
-  }//end while
-  digitalWrite(FONA_KEY, HIGH);
-  //delay(2000); 
-}//end fona_on
-
-void fona_off(){
-  #if defined(DEBUG)
-    serial.println("Turning off Fona: ");
-  #endif
-  while(digitalRead(FONA_PS)==HIGH){
-    digitalWrite(FONA_KEY, LOW);
-    delay(3000);
-    break;
-  }//end while
-  digitalWrite(FONA_KEY, HIGH);
-  //delay(4000);
-}//end fona_off
-
 int fona_gps_on(void){                    //turn GPS on
   if (!fona.enableGPS(true)){
     return 0;                             //Failed to turn GPS on
@@ -379,7 +369,7 @@ uint8_t fona_gsm_location(){
     #endif
   }//end if
   return 0;
-}
+}//end fona_gsm_location
 
 uint16_t fona_get_battery(void){
   // Grab battery reading
@@ -387,6 +377,49 @@ uint16_t fona_get_battery(void){
   fona.getBattPercent(&vbat);
   return vbat;
 }//end fona_get_battery
+
+//====================================================================
+
+//======================MQTT Realated Functions=======================
+
+void MQTT_connect() {
+// Function to connect and reconnect as necessary to the MQTT server.
+// Should be called in the loop function and it will take care if connecting.  
+  int8_t ret;
+  // Stop if already connected.
+  if (mqtt.connected()){
+    return;
+  }
+  #if defined(DEBUG)
+  serial.print("Connecting to MQTT... ");
+  #endif
+
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+    #if defined(DEBUG)
+    serial.println(mqtt.connectErrorString(ret));
+    serial.println("Retrying MQTT connection in 5 seconds...");
+    #endif
+    mqtt.disconnect();
+    delay(5000);  // wait 5 seconds
+  }
+  #if defined(DEBUG)
+  serial.println("MQTT Connected!");
+  #endif
+}//end MQTT_connect
+
+void log_fix(uint32_t fix, Adafruit_MQTT_Publish& publishFeed){
+  if (!publishFeed.publish(fix)) {
+    #if defined(DEBUG)
+    serial.println(F("Publish failed!"));
+    #endif
+    txFailures++;
+  }else {
+    #if defined(DEBUG)
+    serial.println(F("Publish succeeded!"));
+    #endif
+    txFailures = 0;
+  }//end if  
+}//log fix
 
 void log_alert(uint32_t alert, Adafruit_MQTT_Publish& publishFeed) {// Log alerts
   #if defined(DEBUG)
@@ -423,7 +456,6 @@ void log_battery_percent(uint32_t indicator, Adafruit_MQTT_Publish& publishFeed)
     txFailures = 0;
   }//end if
 }//end log_battery_percent
-
 // Serialize the lat, long, altitude to a CSV string that can be published to the specified feed.
 void log_location(float latitude, float longitude, float altitude, Adafruit_MQTT_Publish& publishFeed) {
   // Initialize a string buffer to hold the data that will be published.
@@ -449,8 +481,8 @@ void log_location(float latitude, float longitude, float altitude, Adafruit_MQTT
   }//end if
 }//end log_location
 
-void log_fix(uint32_t fix, Adafruit_MQTT_Publish& publishFeed){
-  if (!publishFeed.publish(fix)) {
+void log_motion_detection(uint32_t detection, Adafruit_MQTT_Publish& publishFeed){
+  if (!publishFeed.publish(detection)) {
     #if defined(DEBUG)
     serial.println(F("Publish failed!"));
     #endif
@@ -461,36 +493,87 @@ void log_fix(uint32_t fix, Adafruit_MQTT_Publish& publishFeed){
     #endif
     txFailures = 0;
   }//end if  
-}
+}//end log_motion_detection
 
-// Function to connect and reconnect as necessary to the MQTT server.
-// Should be called in the loop function and it will take care if connecting.
-void MQTT_connect() {
-  int8_t ret;
-  // Stop if already connected.
-  if (mqtt.connected()){
-    return;
-  }
+//====================================================================
+
+//======================Miscelanius Funcions==========================
+
+void print_IMEI(void){
+  // Print SIM card IMEI number.
+  char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
+  uint8_t imeiLen = fona.getIMEI(imei);
+  if (imeiLen > 0) {
   #if defined(DEBUG)
-  serial.print("Connecting to MQTT... ");
-  #endif
-
-  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
     #if defined(DEBUG)
-    serial.println(mqtt.connectErrorString(ret));
-    serial.println("Retrying MQTT connection in 5 seconds...");
+    serial.print("SIM card IMEI: "); serial.println(imei);
     #endif
-    mqtt.disconnect();
-    delay(5000);  // wait 5 seconds
-  }
-  #if defined(DEBUG)
-  serial.println("MQTT Connected!");
   #endif
-}//end MQTT_connect
+  }//end if  
+}//end print_IMEI
 
-// Calculate distance between two points
-//Adafruit funtion
+void temporizer_1(uint32_t timer, uint32_t interval){//Check connections state
+  if(timer - previousMillis_1 > interval) {
+    if((!fona.GPRSstate())||(fona.getNetworkStatus() != 1)){
+      //halt(F("Network connection problems, resetting..."));
+      init_fona();
+    }else if (!fona.TCPconnected() || (txFailures >= MAX_TX_FAILURES)) {
+      //halt(F("MQTT connection failed, resetting..."));
+      init_fona();
+    }//end if
+    previousMillis_1 = timer;
+  }//end if
+}//end temporizer_1
+
+void temporizer_2(uint32_t timer, uint32_t interval){
+  if(timer - previousMillis_2 > interval) {
+    if(fona_gps_location()){
+      log_location(latitude, longitude, altitude, location_feed);
+      //log_fix(1, status_feed);
+      if (distance > maxDistance) { // Set alarm on?
+        //log_alert(1, alerts_feed);
+      }//end if
+    }//end if         
+    uint16_t fona_battery = fona_get_battery();
+    if(fona_battery != last_fona_battery_state){// 
+      last_fona_battery_state = fona_battery;
+      log_battery_percent(fona_battery, battery_feed);
+    }//end if
+
+    if(deviation > 2){//Ignore small deviations
+      log_motion_detection(deviation, adxl_feed);
+    }//end if
+    
+    previousMillis_2 = timer;
+  }//end if
+}//end temporizer
+
+void gpFIX(){
+  // Initial GPS read
+  bool gpsFix = false;
+  if(fona.GPSstatus() >= 2){//}
+  //do{
+  //while(!gpsFix){
+    //gpsFix = fona.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude);
+    gpsFix = fona_gps_location();
+    initialLatitude = latitude;
+    initialLongitude = longitude;
+    delay(100);
+    if(txFailures > 200){
+      halt(F("GPS not fix"));
+    }//end if
+    txFailures++;
+    delay(10);
+//    return gpsFix;
+  //}while(!gpsFix);
+  }//end if
+  txFailures = 0; 
+//  return 0; 
+}//end gpFIX
+
 float distanceCoordinates(float flat1, float flon1, float flat2, float flon2) {
+  // Calculate distance between two points
+  //Adafruit funtion  
   // Variables
   float dist_calc=0;
   float dist_calc2=0;
@@ -517,6 +600,22 @@ float distanceCoordinates(float flat1, float flon1, float flat2, float flon2) {
   return dist_calc;
 }
 
+float standard_deviation(){//Calculate standard deviation
+  uint8_t n = 690;
+  float media[n], average, devian;  
+  for(uint8_t i = 0; i < n; i++){
+    media[i] = analogRead(ADXL_X);
+  }//end for
+  for(uint8_t i = 0; i < n; i++){
+    average += media[i];
+  }//end for
+  average /=n;
+  for(uint8_t i = 0; i < n; i++){
+    devian = (pow(media[i]-average,2)/(n-1));
+  }//end for
+   return sqrt(devian);
+}//end motion alert
+
 void gps_ready(char *statusF, Adafruit_MQTT_Publish& publishFeed){//uint32_t statusF
   // Finally publish the string to the feed.
   #if defined(DEBUG)
@@ -536,27 +635,6 @@ void gps_ready(char *statusF, Adafruit_MQTT_Publish& publishFeed){//uint32_t sta
     txFailures = 0;
   }//end if
 }//end gps_ready
-
-void halt(const __FlashStringHelper *error) {
-  serial.println(error);
-  delay(1000);
-  Watchdog.enable(1000);
-  Watchdog.reset();
-  while (1) {}
-}//end halt
-
-void print_IMEI(void){
-  // Print SIM card IMEI number.
-  char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
-  uint8_t imeiLen = fona.getIMEI(imei);
-  if (imeiLen > 0) {
-  #if defined(DEBUG)
-    #if defined(DEBUG)
-    serial.print("SIM card IMEI: "); serial.println(imei);
-    #endif
-  #endif
-  }//end if  
-}//end print_IMEI
 
 String float_to_string(float value, uint8_t places) {//Adafruit funtion
   // this is used to cast digits 
@@ -626,3 +704,26 @@ String float_to_string(float value, uint8_t places) {//Adafruit funtion
   }//end for
   return float_obj;
 }//end float_to_string
+
+void flushSerial() {
+  #if defined(DEBUG)
+  while (serial.available()) 
+    serial.read();
+  #endif
+}//end flushSerial
+
+void halt(const __FlashStringHelper *error) {
+  serial.println(error);
+  delay(1000);
+  Watchdog.enable(1000);
+  Watchdog.reset();
+  while (1) {}
+}//end halt
+//====================================================================
+
+
+
+
+
+
+
