@@ -3,7 +3,7 @@
   This sketch use FONA 808 and sparkfun SAMD21 mini to locate through GPS my motorcicle
   It use io.adafruit.com platform(MQTT)
   
-  Ricardo Mena C
+  Ricardo Mena C.
   ricardo@crcibernetica.com
   http://crcibernetica.com
 
@@ -97,23 +97,8 @@ const float maxDistance = 100;
 //Last Fona Battery percentage
 uint16_t last_fona_battery_state;
 
-// Initial GPS read
-//uint8_t gps_fix = 0;
-
 // Latitude & longitude for distance measurement
 float initialLatitude, initialLongitude, latitude, longitude, speed_kph, heading, altitude, distance;
-float gsm_latitude, gsm_longitude;
-
-//float motion_alerts;
-//char *motion_activation = "ON";
-
-//boolean lock_initial_gps = false;
-//uint8_t gps_fix_failures = 0;
-
-// FONA GPRS configuration
-//#define FONA_APN             ""  // APN used by cell data service (leave blank if unused)
-//#define FONA_USERNAME        ""  // Username used by cell data service (leave blank if unused).
-//#define FONA_PASSWORD        ""  // Password used by cell data service (leave blank if unused).
 
 // Adafruit IO configuration
 #define AIO_SERVER           "io.adafruit.com"  // Adafruit IO server name.
@@ -147,9 +132,6 @@ Adafruit_MQTT_Publish alerts_feed = Adafruit_MQTT_Publish(&mqtt, ALERTS_FEED);
 const char ADXL_FEED[] PROGMEM = AIO_USERNAME "/feeds/adxl";
 Adafruit_MQTT_Publish adxl_feed = Adafruit_MQTT_Publish(&mqtt, ADXL_FEED);
 
-//const char MOTION_FEED[] PROGMEM = AIO_USERNAME "/feeds/motion";
-//Adafruit_MQTT_Subscribe motion_active = Adafruit_MQTT_Subscribe(&mqtt, MOTION_FEED);
-
 
 //------------------------------------------------
 
@@ -173,7 +155,6 @@ void setup() {
   init_fona();
   print_IMEI(); 
   
-  log_alert(0, alerts_feed);
 }//end setup
 
 void loop(){
@@ -187,35 +168,6 @@ void loop(){
 
   temporizer_2(millis(), 15000);//Update Adafruit feeds
   
-//TODO 
-/*
- * Mantener corriendo la verificación de vibración, si ocurre una vibración
- * alta, guardar ese dato 10s después revisar si ocurrió una vibración y reportarla
- * de otra forma no reportar nada.
-*/
-  
-/*
-  Adafruit_MQTT_Subscribe *subscription;
-  while ((subscription = mqtt.readSubscription(5000))) {
-    if (subscription == &motion_active) {
-      
-      motion_activation = (char *)motion_active.lastread;
-    }//end if
-  }//end while
-*/
-  /*else if(fona_gsm_location()){
-      log_location(gsm_latitude, gsm_longitude, 0, location_feed);
-      log_fix(0, status_feed);
-  }*/
-/*
-  float devians = standard_deviation();//13ms for every 30 samples
-  if((devians > 2)&&(motion_activation == "ON")){
-    log_motion_detection(devians, adxl_feed);
-    serial.print("DEVIAN = ");
-    serial.println(devians);
-  }//end if
-  //log_fix(gp_fix, status_feed);
-  */
   #if defined(DEBUG)
   serial.flush();
   #endif
@@ -264,7 +216,6 @@ void init_fona(){
     serial.println(F("MQTT Connected!"));
     #endif
   }//end if
-  //mqtt.subscribe(&motion_active);
 }//end init_fona
 
 uint8_t check_fona(){
@@ -298,7 +249,6 @@ void fona_off(){
     break;
   }//end while
   digitalWrite(FONA_KEY, HIGH);
-  //delay(4000);
 }//end fona_off
 
 int gprs_enable(int maxtry){
@@ -358,19 +308,6 @@ uint8_t fona_gps_location(){
   return gps_fix;
 }//end fona_gps_location
 
-uint8_t fona_gsm_location(){
-  if (fona.getNetworkStatus() == 1) {
-    // network & GPRS? Great! Print out the GSM location to compare
-    uint8_t gsm_fix = fona.getGSMLoc(&gsm_latitude, &gsm_longitude);
-    return gsm_fix;
-  }else{
-    #if defined(DEBUG)
-      serial.println("Network problems");
-    #endif
-  }//end if
-  return 0;
-}//end fona_gsm_location
-
 uint16_t fona_get_battery(void){
   // Grab battery reading
   uint16_t vbat;
@@ -420,24 +357,6 @@ void log_fix(uint32_t fix, Adafruit_MQTT_Publish& publishFeed){
     txFailures = 0;
   }//end if  
 }//log fix
-
-void log_alert(uint32_t alert, Adafruit_MQTT_Publish& publishFeed) {// Log alerts
-  #if defined(DEBUG)
-  serial.print(F("Publishing alert: "));
-  serial.println(alert);
-  #endif
-  if (!publishFeed.publish(alert)) {
-    #if defined(DEBUG)
-    serial.println(F("Publish failed!"));
-    #endif
-    txFailures++;
-  }else {
-    #if defined(DEBUG)
-    serial.println(F("Publish succeeded!"));
-    #endif
-    txFailures = 0;
-  }//end if
-}//end log_alert
 
 void log_battery_percent(uint32_t indicator, Adafruit_MQTT_Publish& publishFeed) {// Log battery
   #if defined(DEBUG)
@@ -529,10 +448,6 @@ void temporizer_2(uint32_t timer, uint32_t interval){
   if(timer - previousMillis_2 > interval) {
     if(fona_gps_location()){
       log_location(latitude, longitude, altitude, location_feed);
-      //log_fix(1, status_feed);
-      if (distance > maxDistance) { // Set alarm on?
-        //log_alert(1, alerts_feed);
-      }//end if
     }//end if         
     uint16_t fona_battery = fona_get_battery();
     if(fona_battery != last_fona_battery_state){// 
@@ -551,10 +466,7 @@ void temporizer_2(uint32_t timer, uint32_t interval){
 void gpFIX(){
   // Initial GPS read
   bool gpsFix = false;
-  if(fona.GPSstatus() >= 2){//}
-  //do{
-  //while(!gpsFix){
-    //gpsFix = fona.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude);
+  if(fona.GPSstatus() >= 2){
     gpsFix = fona_gps_location();
     initialLatitude = latitude;
     initialLongitude = longitude;
@@ -564,41 +476,9 @@ void gpFIX(){
     }//end if
     txFailures++;
     delay(10);
-//    return gpsFix;
-  //}while(!gpsFix);
   }//end if
   txFailures = 0; 
-//  return 0; 
 }//end gpFIX
-
-float distanceCoordinates(float flat1, float flon1, float flat2, float flon2) {
-  // Calculate distance between two points
-  //Adafruit funtion  
-  // Variables
-  float dist_calc=0;
-  float dist_calc2=0;
-  float diflat=0;
-  float diflon=0;
-
-  // Calculations
-  diflat  = radians(flat2-flat1);
-  flat1 = radians(flat1);
-  flat2 = radians(flat2);
-  diflon = radians((flon2)-(flon1));
-
-  dist_calc = (sin(diflat/2.0)*sin(diflat/2.0));
-  dist_calc2 = cos(flat1);
-  dist_calc2*=cos(flat2);
-  dist_calc2*=sin(diflon/2.0);
-  dist_calc2*=sin(diflon/2.0);
-  dist_calc +=dist_calc2;
-
-  dist_calc=(2*atan2(sqrt(dist_calc),sqrt(1.0-dist_calc)));
-  
-  dist_calc*=6371000.0; //Converting to meters
-
-  return dist_calc;
-}
 
 float standard_deviation(){//Calculate standard deviation
   uint8_t n = 690;
@@ -615,26 +495,6 @@ float standard_deviation(){//Calculate standard deviation
   }//end for
    return sqrt(devian);
 }//end motion alert
-
-void gps_ready(char *statusF, Adafruit_MQTT_Publish& publishFeed){//uint32_t statusF
-  // Finally publish the string to the feed.
-  #if defined(DEBUG)
-  serial.print(F("Publishing GPS ready: "));
-  serial.println(statusF);
-  #endif
-  if (!publishFeed.publish(statusF)) {
-    #if defined(DEBUG)
-    serial.println(F("StatusF Publish failed!"));
-    #endif
-    txFailures++;
-  }
-  else {
-    #if defined(DEBUG)
-    serial.println(F("Publish succeeded!"));
-    #endif
-    txFailures = 0;
-  }//end if
-}//end gps_ready
 
 String float_to_string(float value, uint8_t places) {//Adafruit funtion
   // this is used to cast digits 
@@ -720,10 +580,3 @@ void halt(const __FlashStringHelper *error) {
   while (1) {}
 }//end halt
 //====================================================================
-
-
-
-
-
-
-
